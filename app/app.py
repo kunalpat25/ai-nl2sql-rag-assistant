@@ -1,39 +1,27 @@
-import os
-import json
-import sqlite3
-from pathlib import Path
+# ai_nl2sql_rag_assistant/app/app.py
 
+import json
 import streamlit as st
+import sqlite3
+import cohere
+from pathlib import Path
 from dotenv import load_dotenv
-from llama_index.core import (
-    SimpleDirectoryReader,
-    VectorStoreIndex,
-    StorageContext,
-    load_index_from_storage,
-)
+import os
+from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext, load_index_from_storage
 from llama_index.embeddings.cohere import CohereEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
-from llama_index.llms.cohere import Cohere as CohereLLM
-import cohere
 import chromadb
 
-# Load environment variables
+# Load environment variables (for Cohere API key)
 load_dotenv()
+client = cohere.ClientV2(api_key=os.getenv("COHERE_API_KEY"))
 
-# Constants
 DB_PATH = str(Path(__file__).resolve().parent.parent / "data" / "sample_transactions.db")
 DOC_PATH = str(Path(__file__).resolve().parent.parent / "data" / "product_docs")
 PERSIST_DIR = str(Path(__file__).resolve().parent.parent / "storage")
-COHERE_API_KEY = os.getenv("COHERE_API_KEY")
-
-# Initialize Cohere client
-cohere_llm_client = cohere.ClientV2(api_key=COHERE_API_KEY)
 
 
 def query_database(nl_query):
-    """
-    Converts a natural language query into an SQL query and executes it on the database.
-    """
     system_prompt = f"""
     Convert the following natural language query into an SQL statement compatible with SQLite:
     SQL table schema: 
@@ -46,10 +34,9 @@ def query_database(nl_query):
     """
 
     try:
-        # Generate SQL query using Cohere
-        response = cohere_llm_client.chat(
+        response = client.chat(
             model="command-r-plus-08-2024",
-            messages=[{"role": "user", "content": system_prompt}],
+            messages=[{"role": "user", "content": system_prompt}], 
             response_format={
                 "type": "json_object",
                 "schema": {
@@ -60,57 +47,36 @@ def query_database(nl_query):
                         "description": {"type": "string"},
                     },
                 },
-            },
+            }
         )
         response_data = json.loads(response.message.content[0].text)
         sql_query = response_data.get("sql_query", "").strip()
 
-        # Execute SQL query on the database
         conn = sqlite3.connect(DB_PATH)
-        cursor = conn.execute(sql_query)
-        result = cursor.fetchall()
-        columns = [description[0] for description in cursor.description]
+        result = conn.execute(sql_query).fetchall()
+        columns = [description[0] for description in conn.execute(sql_query).description]
         conn.close()
-
         return sql_query, columns, result
     except Exception as e:
         return sql_query if 'sql_query' in locals() else "", [], [["Error executing SQL:", str(e)]]
 
 
 def ask_docs(query):
-    """
-    Answers questions about product documents using a vector store and Cohere LLM.
-    """
-    cohere_embedding_client = CohereEmbedding(
-        api_key=COHERE_API_KEY,
-        model_name="embed-english-v3.0",
-        input_type="search_query",
-    )
-    cohere_llm = CohereLLM(api_key=COHERE_API_KEY, model="command-r-plus")
-
     try:
-        # Check if storage directory exists; if not, create and persist index
         if not os.path.exists(PERSIST_DIR):
             documents = SimpleDirectoryReader(DOC_PATH).load_data()
-            vector_store = ChromaVectorStore(
-                chroma_collection=chromadb.Client().create_collection("docs")
-            )
+            vector_store = ChromaVectorStore(chroma_collection=chromadb.Client().create_collection("docs"))
             index = VectorStoreIndex.from_documents(
                 documents,
-                embed_model=cohere_embedding_client,
+                embed_model=CohereEmbedding(model_name="embed-english-v3.0", cohere_api_key=os.getenv("COHERE_API_KEY")),
                 vector_store=vector_store,
             )
             index.storage_context.persist(persist_dir=PERSIST_DIR)
         else:
-            # Load index from storage
             storage_context = StorageContext.from_defaults(persist_dir=PERSIST_DIR)
-            index = load_index_from_storage(
-                storage_context,
-                embed_model=cohere_embedding_client,
-            )
+            index = load_index_from_storage(storage_context)
 
-        # Query the index
-        query_engine = index.as_query_engine(llm=cohere_llm)
+        query_engine = index.as_query_engine()
         response = query_engine.query(query)
         return str(response)
     except Exception as e:
@@ -118,15 +84,37 @@ def ask_docs(query):
 
 
 def main():
-    """
-    Streamlit app entry point.
-    """
+    st.set_page_config(page_title="AI Assistant", layout="wide")
     st.title("🧠 AI Assistant: NL to SQL + Doc QA")
 
-    # Tabs for different functionalities
+    with st.expander("ℹ️ Reference Info: Click to view sample data and docs"):
+        st.markdown("""
+        ### 🗄️ Database Schema
+        - **Table**: `transactions`
+        - **Columns**:
+          - `id` (Integer) – Primary key
+          - `user_id` (Integer)
+          - `transaction_amount` (Float)
+          - `transaction_type` (String): `transfer`, `withdrawal`, `deposit`, `payment`
+          - `status` (String): `success`, `pending`, `failed`
+          - `transaction_date` (Date): `YYYY-MM-DD`
+
+        ### 📄 Documents Info
+        **MoneyTransferPro.txt**:
+        - Daily limit: ₹1,00,000
+        - Max 20 transactions/day
+        - Delay possible between 11PM–4AM
+        - 2FA & AI fraud detection
+
+        **PaySecurePlus.txt**:
+        - International payments up to ₹2,00,000/txn
+        - Biometric + OTP login
+        - Geo-fencing enabled
+        - Chat support 9AM–9PM IST
+        """)
+
     tab1, tab2 = st.tabs(["🗄️ Ask the DB", "📄 Ask the Docs"])
 
-    # Tab 1: Query the database
     with tab1:
         nl_input = st.text_input("Enter your query to fetch data from the DB:")
         if st.button("Ask DB") and nl_input:
@@ -137,7 +125,6 @@ def main():
             else:
                 st.write(rows)
 
-    # Tab 2: Query the documents
     with tab2:
         doc_input = st.text_input("Ask a question about the product documents:")
         if st.button("Ask Docs") and doc_input:
