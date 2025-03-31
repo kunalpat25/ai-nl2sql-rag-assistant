@@ -1,0 +1,15 @@
+Product: PaySecure+
+
+Features:
+- International payments supported
+- Limit: ₹2,00,000 per transaction
+- Max 10 transactions/day
+
+Security:
+- Biometric + OTP login
+- Geo-fencing enabled
+- Real-time transaction alerts
+
+Support:
+- Chat support: 9AM to 9PM IST
+- Dedicated relationship manager for premium users

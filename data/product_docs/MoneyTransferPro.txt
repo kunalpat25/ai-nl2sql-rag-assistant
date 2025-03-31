@@ -1,0 +1,15 @@
+Product: MoneyTransferPro
+
+Features:
+- Daily transaction limit: ₹1,00,000
+- Max transactions per day: 20
+- Supports UPI, IMPS, NEFT
+- Transactions between 11PM-4AM may be delayed
+
+Security:
+- 2-Factor Authentication required
+- AI-based fraud detection enabled
+
+Support:
+- 24x7 chat support
+- Email response within 4 hours
