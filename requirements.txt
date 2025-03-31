@@ -3,3 +3,4 @@ python-dotenv
 cohere
 llama-index
 llama-index-embeddings-cohere
+llama_index.llms.cohere
