@@ -9,12 +9,11 @@ from dotenv import load_dotenv
 import os
 from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, StorageContext, load_index_from_storage
 from llama_index.embeddings.cohere import CohereEmbedding
-from llama_index.vector_stores.chroma import ChromaVectorStore
-import chromadb
+from llama_index.llms.cohere import Cohere
 
 # Load environment variables (for Cohere API key)
 load_dotenv()
-client = cohere.ClientV2(api_key=os.getenv("COHERE_API_KEY"))
+cohere_llm_client = cohere.ClientV2(api_key=os.getenv("COHERE_API_KEY"))
 
 DB_PATH = str(Path(__file__).resolve().parent.parent / "data" / "sample_transactions.db")
 DOC_PATH = str(Path(__file__).resolve().parent.parent / "data" / "product_docs")
@@ -34,7 +33,7 @@ def query_database(nl_query):
     """
 
     try:
-        response = client.chat(
+        response = cohere_llm_client.chat(
             model="command-r-plus-08-2024",
             messages=[{"role": "user", "content": system_prompt}], 
             response_format={
@@ -63,23 +62,36 @@ def query_database(nl_query):
 
 def ask_docs(query):
     try:
+        cohere_embedding_client = CohereEmbedding(
+            model_name="embed-english-v3.0",
+            api_key=os.getenv("COHERE_API_KEY"), 
+            input_type = "search_query"
+        )
+
         if not os.path.exists(PERSIST_DIR):
             documents = SimpleDirectoryReader(DOC_PATH).load_data()
-            vector_store = ChromaVectorStore(chroma_collection=chromadb.Client().create_collection("docs"))
             index = VectorStoreIndex.from_documents(
                 documents,
-                embed_model=CohereEmbedding(model_name="embed-english-v3.0", cohere_api_key=os.getenv("COHERE_API_KEY")),
-                vector_store=vector_store,
+                embed_model=cohere_embedding_client
             )
             index.storage_context.persist(persist_dir=PERSIST_DIR)
         else:
             storage_context = StorageContext.from_defaults(persist_dir=PERSIST_DIR)
-            index = load_index_from_storage(storage_context)
+            index = load_index_from_storage(
+                storage_context,
+                embed_model=cohere_embedding_client
+            )
 
-        query_engine = index.as_query_engine()
+        query_engine = index.as_query_engine(llm=Cohere(
+            model="command-r-plus",api_key=os.getenv("COHERE_API_KEY")))
+        
         response = query_engine.query(query)
         return str(response)
+
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(error_trace)
         return f"Error: {e}"
 
 
